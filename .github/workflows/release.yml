@@ -1,0 +1,71 @@
+name: Release
+
+on:
+    push:
+        tags:
+            - "v*.*.*"
+
+jobs:
+    check-version:
+        runs-on: ubuntu-latest
+        outputs:
+            version: ${{ steps.check-version.outputs.version }}
+        steps:
+            - name: Get version tagname
+              id: check-version
+              shell: bash
+              run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+    build-image:
+        runs-on: ubuntu-latest
+        needs: check-version
+        outputs:
+            artifact: ${{ steps.artifact-upload-step.outputs.artifact-id }}
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+            - name: Set up Docker Buildx
+              uses: docker/setup-buildx-action@v3
+            - name: Build docker image
+              uses: docker/build-push-action@v5
+              with:
+                  context: .
+                  tags: currency-converter:latest
+                  outputs: type=docker,dest=/tmp/currency-converter-docker-${{ needs.check-version.outputs.version }}.tar
+            - name: Upload artifact
+              uses: actions/upload-artifact@v4
+              id: artifact-upload-step
+              with:
+                  name: currency-converter-docker-${{ needs.check-version.outputs.version }}.tar
+                  path: /tmp/currency-converter-docker-${{ needs.check-version.outputs.version }}.tar
+    build-rust:
+        runs-on: ubuntu-latest
+        needs: check-version
+        outputs:
+            artifact: ${{ steps.artifact-upload-step.outputs.artifact-id }}
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+            - name: Build Rust
+              run: cargo build --release
+            - name: Rename artifact
+              run: mv target/release/currency-converter currency-converter-linux-${{ needs.check-version.outputs.version }}
+            - name: Upload artifact
+              uses: actions/upload-artifact@v4
+              id: artifact-upload-step
+              with:
+                  name: currency-converter-linux-${{ needs.check-version.outputs.version }}
+                  path: currency-converter-linux-${{ needs.check-version.outputs.version }}
+    release:
+        runs-on: ubuntu-latest
+        needs: [build-image, check-version, build-rust]
+        steps:
+            - uses: actions/download-artifact@v4
+              with:
+                  path: artifacts
+            - name: List Files
+              run: |
+                  ls artifacts
+            - name: Release
+              uses: softprops/action-gh-release@v2
+              with:
+                  files: artifacts/*/*
